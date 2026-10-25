@@ -1,84 +1,96 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Ticket } from './ticket.interface.js';
+
+import {
+    BadRequestException,
+    Injectable,
+    NotFoundException,
+    BadGatewayException,
+} from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
+import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
+
+import { Ticket as TicketSchemaClass } from './schemas/ticket.schema.js';
 import { CreateTicketDto } from './dto/create-ticket.dto.js';
 import { UpdateTicketDto } from './dto/update-ticket.dto.js';
 
-
 @Injectable()
 export class TicketsService {
-    private readonly tickets: Ticket[] = [
-        { id: 1, title: 'Ticket 1', subject: 'Subject for Ticket 1', description: 'Description for Ticket 1', priority: 'medium', status: 'open' },
-        { id: 2, title: 'Ticket 2', subject: 'Subject for Ticket 2', description: 'Description for Ticket 2', priority: 'high', status: 'in_progress' },
-        { id: 3, title: 'Ticket 3', subject: 'Subject for Ticket 3', description: 'Description for Ticket 3', priority: 'low', status: 'closed' },
-    ];
+    constructor(
+        @InjectModel(TicketSchemaClass.name)
+        private readonly ticketModel: Model<TicketSchemaClass>,
+        private readonly httpService: HttpService,
+    ) { }
 
-    private nextTicketId = 4;
-    findAll(status?: Ticket['status'], priority?: Ticket['priority']) {
-        let tickets = this.tickets;
-        if (status) {
-            tickets = tickets.filter(ticket => ticket.status === status);
-        }
+    async findAll(status?: string, priority?: string) {
+        const filter: Record<string, string> = {};
 
-        if (priority) {
-            tickets = tickets.filter(ticket => ticket.priority === priority);
-        }
-        return tickets;
+        if (status) filter.status = status;
+        if (priority) filter.priority = priority;
 
+        return this.ticketModel.find(filter).exec();
     }
 
-    findOne(id: number) {
-        const ticket = this.tickets.find(ticket => ticket.id === id);
+    async findOne(id: string) {
+        if (!Types.ObjectId.isValid(id)) {
+            throw new BadRequestException('Invalid ticket ID');
+        }
+
+        const ticket = await this.ticketModel.findById(id).exec();
+
         if (!ticket) {
-            throw new NotFoundException(`Ticket with ID ${id} not found`);
+            throw new NotFoundException(`Ticket ${id} not found`);
         }
+
         return ticket;
     }
 
-    create(payload: CreateTicketDto) {
-        const newTicket: Ticket = {
-            id: this.nextTicketId++,
-            title: payload.title,
-            subject: payload.subject,
-            description: payload.description,
-            priority: payload.priority,
+    async create(payload: CreateTicketDto) {
+        return this.ticketModel.create({
+            ...payload,
             status: 'open',
-            createdAt: new Date(),
-        };
-        this.tickets.push(newTicket);
-        return newTicket;
+        });
     }
 
-    update(id: number, payload: UpdateTicketDto) {
-        const ticket = this.findOne(id);
+    async update(id: string, payload: UpdateTicketDto) {
+        const ticket = await this.findOne(id);
+
         if (ticket.status === 'closed') {
-            throw new BadRequestException(`Ticket with ID ${id} is closed and cannot be updated`);
+            throw new BadRequestException(
+                'Closed tickets cannot be updated',
+            );
         }
-        if (payload.title !== undefined) {
-            ticket.title = payload.title;
-        }
-        if (payload.subject !== undefined) {
-            ticket.subject = payload.subject;
-        }
-        if (payload.description !== undefined) {
-            ticket.description = payload.description;
-        }
-        if (payload.priority !== undefined) {
-            ticket.priority = payload.priority;
-        }
+
         Object.assign(ticket, payload);
-        return ticket;
-
+        return ticket.save();
     }
 
+    async closeTicket(id: string) {
+        const ticket = await this.findOne(id);
 
-    closeTicket(id: number) {
-        const ticket = this.findOne(id);
         if (ticket.status === 'closed') {
-            throw new BadRequestException(`Ticket with ID ${id} is already closed`);
+            throw new BadRequestException(
+                'Ticket is already closed',
+            );
         }
-        ticket.status = 'closed';
 
-        return ticket;
+        ticket.status = 'closed';
+        return ticket.save();
     }
 
+    async fetchExternalPosts() {
+        try {
+            const response = await firstValueFrom(
+                this.httpService.get(
+                    'https://jsonplaceholder.typicode.com/posts',
+                ),
+            );
+
+            return response.data;
+        } catch {
+            throw new BadGatewayException(
+                'Failed to fetch external posts',
+            );
+        }
+    }
 }

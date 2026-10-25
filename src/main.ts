@@ -4,8 +4,10 @@ import { ValidationPipe } from '@nestjs/common';
 import { ResponseInterceptor } from './common/response.interceptor.js';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
-  });
+  const app = await NestFactory.create(AppModule);
+
+  const PORT = Number(process.env.PORT|| 5000);
+  const NODE_ENV = process.env.NODE_ENV ?? 'development';
 
   app.setGlobalPrefix('api');
 
@@ -16,9 +18,13 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
   app.useGlobalInterceptors(new ResponseInterceptor());
 
-  await app.listen(process.env.PORT ?? 5000);
-  console.log(`Server is running on http://localhost:${process.env.PORT ?? 5000}`);
+  await app.listen(PORT, '0.0.0.0');
+
+  console.log(`Server is running on port ${PORT}`);
+  console.log(`Environment: ${NODE_ENV}`);
 }
-await bootstrap();
+
+bootstrap();
